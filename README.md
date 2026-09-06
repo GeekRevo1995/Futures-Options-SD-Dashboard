@@ -268,6 +268,43 @@ asyncio.run(main())
 
 ---
 
+## ⚡ Databento Snapshot Pipeline (Quick Start)
+
+The recommended production path replaces the Tastytrade dashboard with **Databento CME data (`GLBX.MDP3`)** via the `fetch_databento_snapshot.py` bridge. It pulls official CME EOD settlement/volume/bid/ask/open-interest statistics, computes Black-76 Greeks & dealer exposures, and writes the exact `trading_results/` CSVs that `update_dashboard.py` consumes — no brokerage account required.
+
+### 1. Credentials (`.env`)
+```dotenv
+ACTIVE_PROVIDER=databento
+DATABENTO_API_KEY=db-xxxxxxxxxxxxxxxxxxx
+```
+
+### 2. Run a snapshot (`GC`, `ES`, `NQ`)
+```bash
+python fetch_databento_snapshot.py GC ES NQ   # -> trading_results/YYYY-MM-DD/HH00/
+python update_dashboard.py                    # -> docs/data/... + docs/data/manifest.json
+python live_feed.py                           # real-time overlay -> docs/data/live/
+python -m http.server 8050 --directory docs   # open http://localhost:8050
+```
+
+### 3. Automatic hourly refresh
+* **Windows (Task Scheduler, recommended):** double-click-style one-shot script `run_databento_update.ps1` (or `.cmd`); it chains fetch → update → live overlay and logs to `logs/update.log`.
+  ```powershell
+  schtasks /Create /TN FuturesOptions_DBUpdate /TR "<path>\run_databento_update.cmd" /SC HOURLY /ST 00:15 /F
+  ```
+* **Linux/macOS (cron):**
+  ```cron
+  15 * * * * cd /path/to/Futures-Options-SD-Dashboard && powershell -File run_databento_update.ps1
+  ```
+* **GitHub Actions:** see `.github/workflows/hourly_update.yml`. Add a repository secret named `DATABENTO_API_KEY`; the workflow fetches hourly (Mon–Fri), runs `update_dashboard.py`, and commits the refreshed `docs/data/` + `trading_results/` back to the repo.
+
+### Notes & data behavior
+* Uses the **nearest listed expiration ≥ today** and a **±7% strike band** around the futures mark (spot = yfinance/nearby future close).
+* Per-instrument values come from the Databento `statistics` schema: settlement price, cleared volume, bid/ask, and official open interest (latest revision per day).
+* Each hourly run pulls small `statistics`/`definitions` payloads and spends a small amount of Databento credit (~free-tier friendly); weekend runs reuse the last trading day (e.g., Friday).
+* Live mode (`live_feed.py`) streams Yahoo Finance quotes during market hours; outside market hours it holds the last close.
+
+---
+
 ## 🏗️ Architecture & Directory Structure
 
 ```text
@@ -277,6 +314,9 @@ Futures Options SD Dashboard/
 ├── .env.example                      # Template for supported providers
 ├── demo_institutional_terminal.py   # 💻 CLI Institutional Terminal Showcase
 ├── run_all.py                        # Master script to run analysis tools & backtests
+├── fetch_databento_snapshot.py      # ⭐ Databento bridge: CME EOD chains -> trading_results CSVs
+├── run_databento_update.ps1/.cmd    # One-shot refresh: fetch + update_dashboard + live overlay
+├── run_live_loop.ps1                # Real-time feed loop (logs to logs/live.log)
 ├── update_dashboard.py               # Ingestion pipeline parsing CSVs into JSON
 ├── adapters/                         # 🔌 Multi-Provider Data Adapter System
 │   ├── base.py                       # UnifiedOptionData, UnifiedFuturesData ABC

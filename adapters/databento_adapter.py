@@ -54,16 +54,47 @@ except ImportError:
 # Default dataset for CME Globex
 DATASET = "GLBX.MDP3"
 
-# Map root symbols to parent symbol suffixes
+# Map root symbols to parent symbol suffixes.
+# Databento CME parent-symbology for options uses the exchange "group"
+# (e.g. GC monthlies=OG, GC weeklies=OG1..OG5, ES=EW, NQ=NQ .OPT).
+# Full GC coverage requires all OG* parents.
 SYMBOL_MAP = {
-    "GC": {"opt": "GC.OPT", "fut": "GC.FUT", "exchange": "COMEX"},
-    "SI": {"opt": "SI.OPT", "fut": "SI.FUT", "exchange": "COMEX"},
-    "ES": {"opt": "ES.OPT", "fut": "ES.FUT", "exchange": "CME"},
-    "NQ": {"opt": "NQ.OPT", "fut": "NQ.FUT", "exchange": "CME"},
-    "CL": {"opt": "LO.OPT", "fut": "CL.FUT", "exchange": "NYMEX"},
-    "ZB": {"opt": "OZB.OPT", "fut": "ZB.FUT", "exchange": "CBOT"},
-    "ZN": {"opt": "OZN.OPT", "fut": "ZN.FUT", "exchange": "CBOT"},
+    "GC": {
+        "opt": ["OG.OPT", "OG1.OPT", "OG2.OPT", "OG3.OPT", "OG4.OPT"],
+        "fut": "GC.FUT",
+        "exchange": "COMEX",
+        "groups": ["OG"],
+    },
+    "SI": {"opt": ["SO.OPT"], "fut": "SI.FUT", "exchange": "COMEX"},
+    "ES": {
+        "opt": ["EW.OPT"],
+        "fut": "ES.FUT",
+        "exchange": "CME",
+        "groups": ["EW"],
+    },
+    "NQ": {
+        "opt": ["NQ.OPT"],
+        "fut": "NQ.FUT",
+        "exchange": "CME",
+        "groups": ["NW"],
+    },
+    "CL": {"opt": ["LO.OPT"], "fut": "CL.FUT", "exchange": "NYMEX"},
+    "ZB": {"opt": ["OZB.OPT"], "fut": "ZB.FUT", "exchange": "CBOT"},
+    "ZN": {"opt": ["OZN.OPT"], "fut": "ZN.FUT", "exchange": "CBOT"},
 }
+
+# Statistics stat_type codes (CME MDP 3.0 via Databento normalization)
+STAT_TYPE_VOLUME = 6
+STAT_TYPE_OPEN_INTEREST = 9
+
+
+def _recent_trading_start(days_back: int = 2) -> str:
+    """Return the most recent non-weekend date (YYYY-MM-DD), backing up
+    over Saturdays/Sundays so requests never land entirely on a weekend."""
+    d = (datetime.now(timezone.utc) - timedelta(days=days_back)).date()
+    while d.weekday() >= 5:  # Sat=5, Sun=6
+        d -= timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
 
 CONTRACT_MULTIPLIERS = {
     "GC": 100.0,   # 100 troy oz per contract
@@ -174,31 +205,31 @@ class DatabentoAdapter(BaseDataAdapter):
             )
             return []
 
-        opt_symbol = SYMBOL_MAP[root]["opt"]
+        opt_symbols = SYMBOL_MAP[root].get("opt")
+        if isinstance(opt_symbols, str):
+            opt_symbols = [opt_symbols]
         multiplier = CONTRACT_MULTIPLIERS.get(root, 1.0)
 
-        # Use yesterday as start for latest data
-        start_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime(
-            "%Y-%m-%d"
-        )
+        # Use the most recent non-weekend day as start for latest data
+        start_date = _recent_trading_start(days_back=2)
 
         try:
             # Step 1: Fetch instrument definitions
-            print(f"[Databento] Fetching definitions for {opt_symbol}...")
+            print(f"[Databento] Fetching definitions for {root} options ({opt_symbols})...")
             defs_data = await asyncio.to_thread(
-                self._fetch_definitions, opt_symbol, start_date
+                self._fetch_definitions, opt_symbols, root, start_date
             )
 
             # Step 2: Fetch statistics (OI, volume, settlement)
-            print(f"[Databento] Fetching statistics for {opt_symbol}...")
+            print(f"[Databento] Fetching statistics for {root} options...")
             stats_data = await asyncio.to_thread(
-                self._fetch_statistics, opt_symbol, start_date
+                self._fetch_statistics, opt_symbols, root, start_date
             )
 
             # Step 3: Fetch top-of-book quotes
-            print(f"[Databento] Fetching quotes for {opt_symbol}...")
+            print(f"[Databento] Fetching quotes for {root} options...")
             quotes_data = await asyncio.to_thread(
-                self._fetch_quotes, opt_symbol, start_date
+                self._fetch_quotes, opt_symbols, root, start_date
             )
 
             # Step 4: Merge data and create UnifiedOptionData list
@@ -216,46 +247,81 @@ class DatabentoAdapter(BaseDataAdapter):
             print(f"[Databento] Error fetching option chain for {root}: {e}")
             return []
 
-    def _fetch_definitions(self, opt_symbol: str, start_date: str) -> pd.DataFrame:
+    def _fetch_definitions(
+        self, opt_symbols: list[str], root: str, start_date: str
+    ) -> pd.DataFrame:
         """Fetch instrument definitions — runs in thread."""
-        data = self._hist_client.timeseries.get_range(
-            dataset=DATASET,
-            schema="definition",
-            stype_in="parent",
-            symbols=opt_symbol,
-            start=start_date,
-        )
-        return data.to_df()
-
-    def _fetch_statistics(self, opt_symbol: str, start_date: str) -> pd.DataFrame:
-        """Fetch statistics (OI, volume, settlement) — runs in thread."""
-        try:
-            data = self._hist_client.timeseries.get_range(
-                dataset=DATASET,
-                schema="statistics",
-                stype_in="parent",
-                symbols=opt_symbol,
-                start=start_date,
-            )
-            return data.to_df()
-        except Exception as e:
-            print(f"[Databento] Warning: Could not fetch statistics: {e}")
+        frames = []
+        for sym in opt_symbols:
+            try:
+                data = self._hist_client.timeseries.get_range(
+                    dataset=DATASET,
+                    schema="definition",
+                    stype_in="parent",
+                    symbols=sym,
+                    start=start_date,
+                )
+                df = data.to_df()
+                if not df.empty:
+                    frames.append(df)
+            except Exception as e:
+                print(f"[Databento] Warning: definitions failed for {sym}: {e}")
+        if not frames:
             return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
 
-    def _fetch_quotes(self, opt_symbol: str, start_date: str) -> pd.DataFrame:
+    def _fetch_statistics(
+        self, opt_symbols: list[str], root: str, start_date: str
+    ) -> pd.DataFrame:
+        """Fetch statistics (OI, volume, settlement) — runs in thread.
+
+        Stat types are filtered to volume (6) and open interest (9) only.
+        """
+        frames = []
+        for sym in opt_symbols:
+            try:
+                data = self._hist_client.timeseries.get_range(
+                    dataset=DATASET,
+                    schema="statistics",
+                    stype_in="parent",
+                    symbols=sym,
+                    start=start_date,
+                )
+                df = data.to_df()
+                if df.empty:
+                    continue
+                if "stat_type" in df.columns:
+                    df = df[df["stat_type"].isin([STAT_TYPE_VOLUME, STAT_TYPE_OPEN_INTEREST])]
+                frames.append(df)
+            except Exception as e:
+                print(f"[Databento] Warning: Could not fetch statistics for {sym}: {e}")
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
+
+    def _fetch_quotes(
+        self, opt_symbols: list[str], root: str, start_date: str
+    ) -> pd.DataFrame:
         """Fetch top-of-book quotes — runs in thread."""
-        try:
-            data = self._hist_client.timeseries.get_range(
-                dataset=DATASET,
-                schema="mbp-1",
-                stype_in="parent",
-                symbols=opt_symbol,
-                start=start_date,
-            )
-            return data.to_df()
-        except Exception as e:
-            print(f"[Databento] Warning: Could not fetch quotes: {e}")
+        frames = []
+        for sym in opt_symbols:
+            try:
+                data = self._hist_client.timeseries.get_range(
+                    dataset=DATASET,
+                    schema="mbp-1",
+                    stype_in="parent",
+                    symbols=sym,
+                    start=start_date,
+                    limit=20000,
+                )
+                df = data.to_df()
+                if not df.empty:
+                    frames.append(df)
+            except Exception as e:
+                print(f"[Databento] Warning: Could not fetch quotes for {sym}: {e}")
+        if not frames:
             return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
 
     def _merge_option_data(
         self,
@@ -274,13 +340,19 @@ class DatabentoAdapter(BaseDataAdapter):
         if defs_df.empty:
             return options
 
-        # Build lookup dicts keyed by instrument_id or raw_symbol
-        stats_by_id = {}
-        if not stats_df.empty and "instrument_id" in stats_df.columns:
-            # Group by instrument and take latest
+        # Build lookup dicts keyed by instrument_id
+        # statistics holds one row per (instrument, stat_type): 6=volume, 9=open interest
+        vol_by_id = {}
+        oi_by_id = {}
+        if not stats_df.empty and "stat_type" in stats_df.columns:
+            # group by instrument_id + stat_type, take the latest row per key
             for inst_id, group in stats_df.groupby("instrument_id"):
-                latest = group.iloc[-1]
-                stats_by_id[inst_id] = latest
+                vol_rows = group[group["stat_type"] == STAT_TYPE_VOLUME]
+                oi_rows = group[group["stat_type"] == STAT_TYPE_OPEN_INTEREST]
+                if len(vol_rows):
+                    vol_by_id[inst_id] = vol_rows.iloc[-1]
+                if len(oi_rows):
+                    oi_by_id[inst_id] = oi_rows.iloc[-1]
 
         quotes_by_id = {}
         if not quotes_df.empty and "instrument_id" in quotes_df.columns:
@@ -344,17 +416,13 @@ class DatabentoAdapter(BaseDataAdapter):
                     ask = self._safe_float(q.get("ask_px_00", 0))
                     last = self._safe_float(q.get("price", 0))
 
-                # Get statistics data
+                # Get statistics data (stat_type 6=volume, 9=open interest)
                 volume = 0
                 open_interest = 0
-                if inst_id in stats_by_id:
-                    s = stats_by_id[inst_id]
-                    volume = int(self._safe_float(s.get("quantity", 0)))
-                    open_interest = int(self._safe_float(s.get("quantity", 0)))
-                    # Check stat_type for distinguishing OI vs volume
-                    stat_type = s.get("stat_type", "")
-                    if hasattr(stat_type, "value"):
-                        stat_type = stat_type.value
+                if inst_id in vol_by_id:
+                    volume = int(self._safe_float(vol_by_id[inst_id].get("quantity", 0)))
+                if inst_id in oi_by_id:
+                    open_interest = int(self._safe_float(oi_by_id[inst_id].get("quantity", 0)))
 
                 opt = UnifiedOptionData(
                     symbol=root,
@@ -440,9 +508,7 @@ class DatabentoAdapter(BaseDataAdapter):
             return UnifiedFuturesData(symbol=root, price=0.0, provider="databento")
 
         fut_symbol = SYMBOL_MAP[root]["fut"]
-        start_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime(
-            "%Y-%m-%d"
-        )
+        start_date = _recent_trading_start(days_back=4)
 
         try:
             # Fetch recent trades for the futures contract
@@ -676,14 +742,14 @@ class DatabentoAdapter(BaseDataAdapter):
         if root not in SYMBOL_MAP:
             return []
 
-        opt_symbol = SYMBOL_MAP[root]["opt"]
-        start_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime(
-            "%Y-%m-%d"
-        )
+        opt_symbols = SYMBOL_MAP[root]["opt"]
+        if isinstance(opt_symbols, str):
+            opt_symbols = [opt_symbols]
+        start_date = _recent_trading_start(days_back=2)
 
         try:
             df = await asyncio.to_thread(
-                self._fetch_definitions, opt_symbol, start_date
+                self._fetch_definitions, opt_symbols, root, start_date
             )
             if df.empty:
                 return []

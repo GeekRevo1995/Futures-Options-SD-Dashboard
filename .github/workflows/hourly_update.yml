@@ -1,15 +1,13 @@
-name: Hourly Dashboard Update
+name: Hourly Dashboard Update (Databento)
 
 on:
   schedule:
-    - cron: '0 * * * 1-5'  # Every hour, Monday through Friday
+    - cron: '0 * * * 1-5'  # Every hour, Monday through Friday (UTC)
   workflow_dispatch: {}   # Manual trigger
 
 jobs:
   update-dashboard:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
 
@@ -26,16 +24,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Create .env for credentials
+      - name: Create .env for Databento
         run: |
-          echo "TASTYTRADE_CLIENT_SECRET=${{ secrets.TASTYTRADE_CLIENT_SECRET }}" >> .env
-          echo "TASTYTRADE_REFRESH_TOKEN=${{ secrets.TASTYTRADE_REFRESH_TOKEN }}" >> .env
+          echo "DATABENTO_API_KEY=${{ secrets.DATABENTO_API_KEY }}" >> .env
+          echo "ACTIVE_PROVIDER=databento" >> .env
 
-      - name: Run analysis pipeline
-        run: python run_all.py
-        env:
-          TASTYTRADE_CLIENT_SECRET: ${{ secrets.TASTYTRADE_CLIENT_SECRET }}
-          TASTYTRADE_REFRESH_TOKEN: ${{ secrets.TASTYTRADE_REFRESH_TOKEN }}
+      - name: Fetch Databento snapshot (GC / ES / NQ -> trading_results CSVs)
+        run: python fetch_databento_snapshot.py GC ES NQ
 
       - name: Update dashboard JSON from results
         run: python update_dashboard.py
@@ -45,5 +40,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/data/ trading_results/
-          git commit -m "📊 Auto-update $(date -u +'%Y-%m-%d %H:%M') UTC" || echo "No changes to commit"
+          git commit -m "Data: auto-update $(date -u +'%Y-%m-%d %H:%M') UTC" || echo "No changes to commit"
           git push

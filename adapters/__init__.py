@@ -34,7 +34,9 @@ except ImportError:
 
 try:
     from .ibkr_adapter import IBKRAdapter
-except ImportError:
+except Exception:
+    # ib_insync/eventkit can fail to import on some Python versions
+    # (e.g. RuntimeError from asyncio.get_event_loop on Python 3.14+).
     IBKRAdapter = None
 
 try:

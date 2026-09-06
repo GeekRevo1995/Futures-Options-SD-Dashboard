@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 .idea/
+logs/
 # Data results (Removed from ignore to allow GitHub Actions to commit)
 *.png
 
