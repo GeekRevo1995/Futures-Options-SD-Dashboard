@@ -57,6 +57,14 @@
           </button>
         </div>
 
+        <!-- Deep Setup Button (on-demand analysis) -->
+        <div class="refresh-control">
+          <button class="asset-btn setup-btn" id="btn-deep-setup" onclick="DeepSetup.run()" title="Deep Analysis on Real-Time Data & High-Probability Setups">
+            <span class="material-symbols-outlined mode-icon">psychology</span>
+            <span class="mode-label">DEEP SETUP</span>
+          </button>
+        </div>
+
         <!-- Mode Toggle (Real-Time vs History Archive) -->
         <div class="mode-toggle-group">
           <button class="mode-btn active" id="btn-mode-realtime" onclick="setDashboardMode('realtime')" title="Switch to Real-Time Streaming Mode">
@@ -597,6 +605,7 @@
 
   <!-- App Logic -->
   <script src="app.js?v=3.4"></script>
+  <script src="setup_engine.js?v=1.0"></script>
 
 </body>
 

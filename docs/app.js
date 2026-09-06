@@ -2235,6 +2235,7 @@ function createTradingViewChart(containerId, ohlcv, vwap, options = {}) {
       visible: true,  // Turn on left axis!
       borderColor: '#1A1B20',
       autoScale: true,
+      scaleMargins: { top: 0.05, bottom: 0.25 }, // leave bottom 25% for volume pane
     },
     timeScale: {
       borderColor: '#1A1B20',
@@ -2282,6 +2283,34 @@ function createTradingViewChart(containerId, ohlcv, vwap, options = {}) {
       }));
     vwapSeries.setData(mappedVwap);
   }
+
+  // 5b. Volume histogram pane (bottom 20% of the chart)
+  let volumeSeries = null;
+  try {
+    volumeSeries = chart.addHistogramSeries({
+      priceScaleId: 'volume',
+      priceFormat: { type: 'volume' },
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+      visible: false,
+    });
+    const volumes = ohlcv
+      .map(d => {
+        const vol = Number(d[5]);
+        return vol > 0
+          ? {
+              time: d[0] / 1000,
+              value: vol,
+              color: d[4] >= d[1] ? 'rgba(0, 227, 150, 0.55)' : 'rgba(255, 69, 96, 0.55)',
+            }
+          : null;
+      })
+      .filter(Boolean);
+    volumeSeries.setData(volumes);
+  } catch (e) { /* non-fatal: volume pane optional */ }
 
   // 6. Draw Horizontal Levels (SD Bands, S/R Levels)
   if (options.levels && options.levels.length > 0) {
@@ -2333,6 +2362,14 @@ function createTradingViewChart(containerId, ohlcv, vwap, options = {}) {
       }
     }
 
+    let volumeText = '—';
+    if (volumeSeries) {
+      const vol = param.seriesData.get(volumeSeries);
+      if (vol && vol.value != null) {
+        volumeText = formatCompact(vol.value);
+      }
+    }
+
     tooltip.style.display = 'block';
     tooltip.innerHTML = `
       <div class="tv-chart-tooltip-title">${dateStr}</div>
@@ -2355,6 +2392,10 @@ function createTradingViewChart(containerId, ohlcv, vwap, options = {}) {
       <div class="tv-chart-tooltip-row">
         <span class="tv-chart-tooltip-label">VWAP</span>
         <span class="tv-chart-tooltip-value" style="color: #4D9EFF">${vwapValueText}</span>
+      </div>
+      <div class="tv-chart-tooltip-row">
+        <span class="tv-chart-tooltip-label">Vol</span>
+        <span class="tv-chart-tooltip-value">${volumeText}</span>
       </div>
     `;
 
