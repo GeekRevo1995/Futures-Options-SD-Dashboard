@@ -13,8 +13,8 @@ $ErrorActionPreference = 'Continue'
 $logDir = Join-Path $PSScriptRoot 'logs'
 $logFile = Join-Path $logDir 'live.log'
 $liveScript = Join-Path $PSScriptRoot 'live_feed.py'
-$outTmp = Join-Path $logDir '_live_cycle.out'
-$errTmp = Join-Path $logDir '_live_cycle.err'
+$outTmp = Join-Path $logDir ("_live_cycle_" + $PID + ".out")
+$errTmp = Join-Path $logDir ("_live_cycle_" + $PID + ".err")
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 if ($env:PYTHON_EXE -and (Test-Path $env:PYTHON_EXE)) {
@@ -29,6 +29,16 @@ if ($env:PYTHON_EXE -and (Test-Path $env:PYTHON_EXE)) {
 if (-not $Python) {
     Write-Output '[ERROR] python.exe not found' | Add-Content -Path $logFile
     exit 1
+}
+
+# Single-instance guard: refuse to start if another live loop powershell is alive
+# (detects both full-path and 8.3 short-path launches, excluding ourselves).
+$dupe = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'run_live_loop|RUN_LI~1' }
+if ($dupe) {
+    Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] another live loop is already running (pid $($dupe.ProcessId)); exiting." | Add-Content -Path $logFile
+    Write-Output "Another live loop is already running (pid $($dupe.ProcessId)). This instance exits without starting."
+    exit 0
 }
 
 Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] live loop started (every ${IntervalSec}s, cycle timeout ${CycleTimeoutSec}s)" | Add-Content -Path $logFile

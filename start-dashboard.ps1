@@ -44,7 +44,7 @@ if ($serverUp) {
 
 # 2. Live feed loop (every 10s)
 $loopRunning = (Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-                Where-Object { $_.CommandLine -like '*run_live_loop.ps1*' })
+                Where-Object { $_.CommandLine -match 'run_live_loop|RUN_LI~1' })
 if ($loopRunning) {
     Write-Output "  live loop: already running (pid $($loopRunning.ProcessId))" | Add-Content -Path $logFile
 } else {
