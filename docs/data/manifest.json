@@ -86,21 +86,22 @@
     "2026-09-04/2100",
     "2026-09-04/2300",
     "2026-09-06/1400",
-    "2026-09-06/1500"
+    "2026-09-06/1500",
+    "2026-09-06/1600"
   ],
-  "last_updated": "2026-09-06 14:21 UTC",
+  "last_updated": "2026-09-06 16:32 UTC",
   "assets": [
     "GC",
     "ES",
     "NQ"
   ],
   "quant_backtest_scorecard": {
-    "total_signals": 199,
+    "total_signals": 202,
     "evaluated_signals": 161,
-    "overall_accuracy_pct": 26.7,
+    "overall_accuracy_pct": 27.3,
     "bull_accuracy_pct": 43.4,
-    "bear_accuracy_pct": 18.5,
-    "profit_factor": 0.2,
-    "sharpe_ratio": -20.51
+    "bear_accuracy_pct": 19.4,
+    "profit_factor": 0.24,
+    "sharpe_ratio": -18.82
   }
 }

@@ -308,10 +308,11 @@ def parse_option_data_csv(csv_path):
         
         iv_strikes = sorted(set(list(call_iv_map.keys()) + list(put_iv_map.keys())))
         if len(iv_strikes) >= 3:
+            MAX_SMILE_IV_PCT = 300.0
             iv_smile = {
                 "strikes": iv_strikes,
-                "call_iv": [round(call_iv_map.get(s, 0) * 100, 2) for s in iv_strikes],
-                "put_iv": [round(put_iv_map.get(s, 0) * 100, 2) for s in iv_strikes],
+                "call_iv": [min(round(call_iv_map.get(s, 0) * 100, 2), MAX_SMILE_IV_PCT) for s in iv_strikes],
+                "put_iv": [min(round(put_iv_map.get(s, 0) * 100, 2), MAX_SMILE_IV_PCT) for s in iv_strikes],
             }
 
     # Max Pain Calculation

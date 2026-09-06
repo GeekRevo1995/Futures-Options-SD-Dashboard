@@ -153,6 +153,12 @@ def yf_price(root):
     if not sym:
         return None
     try:
+        lp = yf.Ticker(sym).fast_info.last_price
+        if lp:
+            return float(lp)
+    except Exception:
+        pass
+    try:
         hist = yf.Ticker(sym).history(period="1d")
         if not hist.empty:
             return float(hist["Close"].iloc[-1])
@@ -233,9 +239,10 @@ def fetch_statistics(client, parents, day):
     return pd.concat(frames, ignore_index=True)
 
 
-def resolve_chain_universe(defs):
-    """Keep C/P outright options; return nearest active expiry and the related
-    subset of definitions plus the underlying futures contract."""
+def resolve_chain_universe(defs, stats):
+    """Keep C/P outright options; return the most actively traded expiry (by
+    total EOD open interest) and the related subset of definitions plus the
+    underlying futures contract. Falls back to the nearest expiry if no stats."""
     opt = defs[defs["instrument_class"].isin(["C", "P"])].copy()
     if opt.empty:
         raise RuntimeError("No C/P option definitions found")
@@ -244,7 +251,14 @@ def resolve_chain_universe(defs):
     exps = sorted({p.date() for p in opt["expiration"] if p.date() >= today})
     if not exps:
         exps = sorted({p.date() for p in opt["expiration"]})
-    target = exps[0]
+
+    oi_s = stats[stats["stat_type"] == STAT_OI].groupby("instrument_id")["quantity"].sum()
+    opt["_oi"] = opt["instrument_id"].map(oi_s).fillna(0.0)
+    oi_by_exp = opt.groupby(opt["expiration"].dt.date)["_oi"].sum()
+
+    target = max(exps, key=lambda e: oi_by_exp.get(e, 0.0))
+    if oi_by_exp.get(target, 0.0) <= 0:
+        target = exps[0]
 
     chain = opt[opt["expiration"].dt.date == target].copy()
     if chain.empty:
@@ -442,7 +456,8 @@ async def process_asset(client, adapter, root, output_base, timestamp_hhmm):
     day = get_last_trading_day()
 
     defs = await asyncio.to_thread(fetch_definitions, client, OPT_PARENTS[root], day)
-    target, chain, underlying = resolve_chain_universe(defs)
+    stats = await asyncio.to_thread(fetch_statistics, client, OPT_PARENTS[root], day)
+    target, chain, underlying = resolve_chain_universe(defs, stats)
     print(f"  -> target expiry {target} | underlying {underlying}")
 
     spot = yf_price(root)
@@ -465,7 +480,6 @@ async def process_asset(client, adapter, root, output_base, timestamp_hhmm):
     if chain.empty:
         raise RuntimeError(f"No options in range [{lo:.1f}, {hi:.1f}] for {root}")
 
-    stats = await asyncio.to_thread(fetch_statistics, client, OPT_PARENTS[root], day)
     rows = build_rows(chain, stats, root, spot, day)
     if not rows:
         raise RuntimeError(f"No chain data for {root} on {day}")

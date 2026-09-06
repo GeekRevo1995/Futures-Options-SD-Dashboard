@@ -7,10 +7,14 @@ and generates docs/data/live/{ASSET}_data.json for real-time dashboard streaming
 import json
 import math
 import os
+import socket
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Never let a stalled network call freeze the live loop.
+socket.setdefaulttimeout(15)
 
 # Safe yfinance import
 try:
@@ -66,6 +70,52 @@ def fetch_live_prices():
 
     return prices
 
+
+def _interp(strikes, ivals, price):
+    """Linear interpolation in percent units, clamped at the edges, ignoring zero/missing."""
+    pts = []
+    for k, v in zip(strikes, ivals):
+        if k is not None and v not in (None, 0):
+            pts.append((float(k), float(v)))
+    if not pts:
+        return None
+    pts.sort()
+    xs = [p[0] for p in pts]
+    if price <= xs[0]:
+        return pts[0][1]
+    if price >= xs[-1]:
+        return pts[-1][1]
+    for i in range(len(pts) - 1):
+        k0, k1 = xs[i], xs[i + 1]
+        if k0 <= price <= k1:
+            t = (price - k0) / (k1 - k0) if k1 > k0 else 0.0
+            return pts[i][1] + t * (pts[i + 1][1] - pts[i][1])
+    return None
+
+
+def reanchor_atm_iv(smile, price, fallback_iv="0.25"):
+    """Re-anchor the daily IV smile at the live spot -> ATM IV (decimal). Free, no extra feed."""
+    try:
+        strikes = smile.get("strikes") or []
+        call_iv = smile.get("call_iv") or []
+        put_iv = smile.get("put_iv") or []
+        if len(strikes) >= 3 and price > 0:
+            call = _interp(strikes, call_iv, price)
+            put = _interp(strikes, put_iv, price)
+            if call and put:
+                return round((call + put) * 0.5 / 100.0, 6)
+            if call:
+                return round(call / 100.0, 6)
+            if put:
+                return round(put / 100.0, 6)
+    except Exception:
+        pass
+    try:
+        return round(float(str(fallback_iv).replace("%", "")) / 100.0, 6)
+    except (TypeError, ValueError):
+        return 0.25
+
+
 def generate_live_snapshot():
     """Generate docs/data/live/{ASSET}_data.json using real-time prices."""
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -118,12 +168,16 @@ def generate_live_snapshot():
                 data["bias"]["is_realtime"] = True
                 data["bias"]["live_sync_time"] = now_str
 
-            # 2. Update SD Bands dynamically around current live price (Eliminates Slippage Gap)
+            # 2. Re-anchor ATM IV from the daily smile at the live spot, refresh SD bands
+            live_iv = reanchor_atm_iv(data.get("iv_smile") or {}, current_price, data.get("bias", {}).get("iv"))
+            data["bias"]["iv_raw"] = live_iv
+            data["bias"]["iv"] = f"{live_iv * 100:.1f}%"
+
             if "sd_bands" in data and isinstance(data["sd_bands"], dict):
-                iv = float(data.get("bias", {}).get("iv_raw") or 0.25)
-                sd1 = round(current_price * iv * math.sqrt(1.0 / 365.0), 2)
+                sd1 = round(current_price * live_iv * math.sqrt(1.0 / 365.0), 2)
                 data["sd_bands"]["price"] = current_price
                 data["sd_bands"]["sd1"] = sd1
+                data["sd_bands"]["daily_vol_pct"] = round((sd1 / current_price) * 100, 2) if current_price > 0 else 0
                 data["sd_bands"]["levels"] = {
                     "+1SD": round(current_price + sd1, 2),
                     "+2SD": round(current_price + sd1 * 2, 2),
@@ -148,7 +202,8 @@ def generate_live_snapshot():
                 "active": True,
                 "server_time_utc": now_str,
                 "epoch_ms": now_epoch_ms,
-                "source": "Yahoo Finance Real-time CME Futures Feed" if asset in live_prices else "Baseline Active Feed"
+                "source": "Yahoo Finance Real-time CME Futures Feed" if asset in live_prices else "Baseline Active Feed",
+                "atm_iv_reanchored": True
             }
 
             # Write out to docs/data/live/{asset}_data.json
