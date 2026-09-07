@@ -854,7 +854,10 @@ function renderRealtimeTick(data) {
   // 3. Update Mini Panels (PCR, GEX, Skew)
   updateMiniPanels(data);
 
-  // 4. Update Quant Intelligence (Dealer Spot Shock Rebalancing Table)
+  // 4. Restore Max Pain metric & chart (renderBiasCard resets metric to "—")
+  renderMaxPainChart(data.oi_walls, data.max_pain, data.bias, data);
+
+  // 5. Update Quant Intelligence (Dealer Spot Shock Rebalancing Table)
   renderQuantIntelligence(data);
 }
 

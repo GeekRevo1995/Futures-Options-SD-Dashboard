@@ -946,7 +946,7 @@ def process_timestamp(date_str, hour_str):
         data["scenarios"] = run_stress_scenarios(raw_rows, price, dte_val, multiplier=mult) if opt_csv and raw_rows else None
 
         # 6g. Pin Risk & Expiry Magnet Dynamics (Delta & Gamma Weighted)
-        max_pain_val = data.get("max_pain", {}).get("max_pain_strike") if data.get("max_pain") else None
+        max_pain_val = data.get("max_pain", {}).get("price") if data.get("max_pain") else None
         pin_res = calc_pin_risk(raw_rows, price, dte_val, max_pain_strike=max_pain_val) if opt_csv and raw_rows else None
         if pin_res and opt_csv and raw_rows:
             dist_res = calc_pinning_probability_distribution(raw_rows, price, dte_val, atm_iv=iv if iv > 0 else 0.20)
