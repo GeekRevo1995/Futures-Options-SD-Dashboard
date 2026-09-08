@@ -1,0 +1,4 @@
+Asset,Price,Bias,Conf%,IV%,PCR(V),Skew%,Act%,GEX,Wall(R/S),QualityScore,QualityWarnings
+Gold,4442.6,Mild BULL,33%,41.8%,0.0,+0.0%,0.0%,VOLTL,4390.0/4185.0,52.8,Low Data Quality Alert: Only 52.8% of options have liquid spreads.; Wide Bid-Ask Spread detected at 116 strikes. Exposure calculations might be noisy.; Zero Bid detected at 1 strikes (illiquid/deep OTM contracts).
+S&P 500,7703.0,Mild BULL,17%,16.0%,0.0,-3.8%,0.0%,VOLTL,7900.0/7700.0,100.0,None
+NASDAQ,29591.0,Mild BULL,33%,18.2%,0.0,+3.1%,0.0%,VOLTL,27700.0/29400.0,83.8,Wide Bid-Ask Spread detected at 24 strikes. Exposure calculations might be noisy.; Zero Bid detected at 1 strikes (illiquid/deep OTM contracts).
